@@ -231,6 +231,7 @@ func (r *RedisClient) WriteBlock(login, id string, params []string, diff, roundD
 }
 
 func (r *RedisClient) writeShare(tx *redis.Multi, ms, ts int64, login, id string, diff int64, expire time.Duration) {
+	log.Printf("LOG - hashrate : %s", diff)
 	tx.HIncrBy(r.formatKey("shares", "roundCurrent"), login, diff)
 	tx.ZAdd(r.formatKey("hashrate"), redis.Z{Score: float64(ts), Member: join(diff, login, id, ms)})
 	tx.ZAdd(r.formatKey("hashrate", login), redis.Z{Score: float64(ts), Member: join(diff, id, ms)})
