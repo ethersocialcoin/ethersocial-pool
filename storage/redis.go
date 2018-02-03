@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"log"
 	"math/big"
 	"strconv"
 	"strings"
@@ -20,8 +21,10 @@ type Config struct {
 }
 
 type RedisClient struct {
-	client *redis.Client
-	prefix string
+	client              *redis.Client
+	prefix              string
+	hashrateWindow      time.Duration
+	hashrateLargeWindow time.Duration
 }
 
 type BlockData struct {
@@ -180,12 +183,19 @@ func (r *RedisClient) WriteShare(login, id string, params []string, diff int64, 
 
 	ms := util.MakeTimestamp()
 	ts := ms / 1000
+	//해시제한
+	//	log.Printf("login : %s", login)
+	//	log.Printf("diff : %d", diff)
+	mineraccept, err := r.AccountHash(login)
 
-	_, err = tx.Exec(func() error {
-		r.writeShare(tx, ms, ts, login, id, diff, window)
-		tx.HIncrBy(r.formatKey("stats"), "roundShares", diff)
-		return nil
-	})
+	log.Printf("mineraccept : %b\n", mineraccept)
+	if mineraccept {
+		_, err = tx.Exec(func() error {
+			r.writeShare(tx, ms, ts, login, id, diff, window)
+			tx.HIncrBy(r.formatKey("stats"), "roundShares", diff)
+			return nil
+		})
+	}
 	return false, err
 }
 
@@ -956,4 +966,45 @@ func convertPaymentsResults(raw *redis.ZSliceCmd) []map[string]interface{} {
 		result = append(result, tx)
 	}
 	return result
+}
+
+func (r *RedisClient) AccountHash(login string) (bool, error) {
+	exist, err := r.IsMinerExists(login)
+	if !exist {
+		log.Printf("TEST1 : %v", err)
+		return true, nil
+	}
+	if err != nil {
+		log.Printf("TEST2 : %v", err)
+		return true, nil
+	}
+
+	hashrateWindow := util.MustParseDuration("30m")
+	hashrateLargeWindow := util.MustParseDuration("3h")
+
+	workers, err := r.CollectWorkersStats(hashrateWindow, hashrateLargeWindow, login)
+	if err != nil {
+		log.Printf("workers : %s", workers)
+		return true, nil
+	}
+
+	log.Printf("currentHashrate: %d", workers["currentHashrate"])
+	//	log.Printf("workers online : %s", workers["workersOnline"])
+
+	// for key, value := range workers {
+	// 	stats[key] = value
+	// }
+	//	stats["pageSize"] = s.config.Payments
+	// reply = &Entry{stats: stats, updatedAt: now}
+	//	s.miners[login] = reply
+	var currentHashrate int64
+	currentHashrate = workers["currentHashrate"].(int64)
+	//	workersOnline, err := strconv.ParseInt(workers["workersOnline"], 10, 64)
+	if currentHashrate > 240000000 {
+		return false, nil
+	}
+	//	if workersOnline > 1 {
+	// 	return false
+	// }
+	return true, nil
 }
